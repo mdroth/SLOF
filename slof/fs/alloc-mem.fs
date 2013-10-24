@@ -28,16 +28,67 @@ heads (max-heads#) cells erase
 
 \ Allocate a memory block
 : alloc-mem  ( len -- a-addr )
-   dup 0= IF EXIT THEN
+   ." alloc-mem IN " dup .  ." heap " heap-start . ." .." heap-end . ."  maxh#=" (max-heads#) . cr
+   d# __LINE__ .d ." : " .s cr
+   dup 0= IF
+        ." alloc-mem RET1 " dup . cr
+        EXIT
+   THEN
+   d# __LINE__ .d ." : " .s cr
    1 over log2 3 max                   ( len 1 log_len )
-   dup (max-heads#) >= IF cr ." Out of internal memory." cr 3drop 0 EXIT THEN
+   dup (max-heads#) >= IF
+        cr ." Out of internal memory." cr
+        3drop 0
+        ." alloc-mem RET2 " dup . cr
+        EXIT
+   THEN
+
+   d# __LINE__ .d ." : " .s cr
    lshift >r                           ( len  R: 1<<log_len )
-   size>head dup @ IF
-      dup @ dup >r @ swap ! r> r> drop EXIT
+   size>head
+   d# __LINE__ .d ." : " .s cr
+   dup
+   @
+   d# __LINE__ .d ." : " .s cr
+   IF
+      dup @
+      dup >r @
+      swap !
+      r> r>
+      drop
+   d# __LINE__ .d ." : " .s cr
+      ." alloc-mem RET3 " dup . cr
+      EXIT
    THEN                                ( headptr  R: 1<<log_len)
-   r@ 2* recurse dup                   ( headptr a-addr2 a-addr2  R: 1<<log_len)
-   dup 0= IF r> 2drop 2drop 0 EXIT THEN
-   r> + >r 0 over ! swap ! r>
+
+   r@
+   d# __LINE__ .d ." : " .s cr
+   2*
+   ." (rec) "
+   d# __LINE__ .d ." : " .s cr
+   recurse
+   dup                   ( headptr a-addr2 a-addr2  R: 1<<log_len)
+   d# __LINE__ .d ." : " .s cr
+   dup 0= IF
+        r>
+        2drop
+        2drop
+        0
+   d# __LINE__ .d ." : " .s cr
+        ." alloc-mem RET4 " dup . cr
+        EXIT
+   THEN
+   r>
+   d# __LINE__ .d ." : " .s cr
+   +
+   >r
+   0
+   d# __LINE__ .d ." : " .s cr
+   over !
+   swap !
+   r>
+   d# __LINE__ .d ." : " .s cr
+   ." alloc-mem RET5 " dup . cr
 ;
 
 

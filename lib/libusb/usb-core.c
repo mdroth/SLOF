@@ -14,7 +14,7 @@
 #include "usb-core.h"
 
 #undef DEBUG
-//#define DEBUG
+#define DEBUG
 #ifdef DEBUG
 #define dprintf(_x ...) printf(_x)
 #else

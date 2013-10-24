@@ -18,12 +18,51 @@
 #include "paflof.h"
 
 #undef EHCI_DEBUG
-//#define EHCI_DEBUG
+#define EHCI_DEBUG
 #ifdef EHCI_DEBUG
 #define dprintf(_x ...) printf(_x)
 #else
 #define dprintf(_x ...)
 #endif
+
+static void __dma_map_out_t(const char *f, int l, long address, void *devaddr, long size)
+{
+    printf("!%s! %s %u: %lx -> %p (%lu bytes)\n", __func__, f, l, address, devaddr, size);
+    SLOF_dma_map_out(address, devaddr, size);
+}
+#define SLOF_dma_map_out(a, b, c)   __dma_map_out_t(__func__, __LINE__, (a), (b), (c))
+
+static long __dma_map_in(const char *f, int l, void *virt, long size, int cacheable)
+{
+    long ret = SLOF_dma_map_in(virt, size, cacheable);
+    printf("!%s! %s %u: %p -> %lx (%lu bytes) c=%u\n", __func__, f, l, virt, ret, size, cacheable);
+    return ret;
+}
+#define SLOF_dma_map_in(v, s, c) __dma_map_in(__func__, __LINE__, (v), (s), (c))
+
+static void *__dma_alloc(const char *f, int l, long size)
+{
+    void *ret = SLOF_dma_alloc(size);
+    printf("!%s! %s %u: %p (%lu bytes)\n", __func__, f, l, ret, size);
+    return ret;
+}
+#define SLOF_dma_alloc(s)   __dma_alloc(__func__, __LINE__, (s))
+
+static void *__alloc_mem(const char *f, int l, long size)
+{
+    void *ret = SLOF_alloc_mem(size);
+    printf("!%s! %s %u: %p (%lu bytes)\n", __func__, f, l, ret, size);
+    return ret;
+}
+#define SLOF_alloc_mem(s)   __alloc_mem(__func__, __LINE__, (s))
+
+static void *__alloc_mem_aligned(const char *f, int l, long align, long size)
+{
+    void *ret = SLOF_alloc_mem_aligned(align, size);
+    printf("!%s! %s %u: %p (%lu bytes, %lu align)\n", __func__, f, l, ret, size, align);
+    return ret;
+}
+#define SLOF_alloc_mem_aligned(a, s)    __alloc_mem_aligned(__func__, __LINE__, (a), (s))
 
 #ifdef EHCI_DEBUG
 static void dump_ehci_regs(struct ehci_hcd *ehcd)
@@ -38,7 +77,8 @@ static void dump_ehci_regs(struct ehci_hcd *ehcd)
 	dprintf("\n - HCIVERSION          %04X", read_reg16(&cap_regs->hciversion));
 	dprintf("\n - HCSPARAMS           %08X", read_reg32(&cap_regs->hcsparams));
 	dprintf("\n - HCCPARAMS           %08X", read_reg32(&cap_regs->hccparams));
-	dprintf("\n - HCSP_PORTROUTE      %016llX", read_reg64(&cap_regs->portroute));
+	//dprintf("\n - HCSP_PORTROUTE32    %08X", read_reg32(&cap_regs->portroute));
+	//dprintf("\n - HCSP_PORTROUTE      %016llX", read_reg64(&cap_regs->portroute));
 	dprintf("\n");
 
 	dprintf("\n - USBCMD              %08X", read_reg32(&op_regs->usbcmd));
@@ -96,12 +136,19 @@ static int ehci_hcd_init(struct ehci_hcd *ehcd)
 	int i;
 	long fl_phys = 0, qh_intr_phys = 0, qh_async_phys;
 
+	SLOF_dma_alloc(0x1000);
+
 	/* Reset the host controller */
 	time = SLOF_GetTimer() + 250;
 	usbcmd = read_reg32(&ehcd->op_regs->usbcmd);
 	write_reg32(&ehcd->op_regs->usbcmd, (usbcmd & ~(CMD_PSE | CMD_ASE)) | CMD_HCRESET);
-	while (time > SLOF_GetTimer())
+	while (time > SLOF_GetTimer()) {
+//	    SLOF_dma_alloc(0x1000);
 		cpu_relax();
+    }
+
+    SLOF_dma_alloc(0x1000);
+
 	usbcmd = read_reg32(&ehcd->op_regs->usbcmd);
 	if (usbcmd & CMD_HCRESET) {
 		printf("usb-ehci: reset failed\n");
@@ -232,12 +279,20 @@ static void ehci_init(struct usb_hcd_dev *hcidev)
 	printf("  EHCI: Initializing\n");
 	dprintf("%s: device base address %p\n", __func__, hcidev->base);
 
-	ehcd = SLOF_alloc_mem(sizeof(*ehcd));
+	SLOF_alloc_mem(0x10);
+	SLOF_alloc_mem(0x100);
+	SLOF_alloc_mem(0x1000);
+	SLOF_alloc_mem(0x1000);
+	SLOF_dma_alloc(0x1000);
+
+	ehcd = SLOF_alloc_mem(0x1000);//sizeof(*ehcd));
 	if (!ehcd) {
 		printf("usb-ehci: Unable to allocate memory\n");
 		return;
 	}
 	memset(ehcd, 0, sizeof(*ehcd));
+
+	SLOF_dma_alloc(0x1000);
 
 	hcidev->nextaddr = 1;
 	hcidev->priv = ehcd;
@@ -246,6 +301,8 @@ static void ehci_init(struct usb_hcd_dev *hcidev)
 	ehcd->op_regs = (struct ehci_op_regs *)(hcidev->base +
 						read_reg8(&ehcd->cap_regs->caplength));
 #ifdef EHCI_DEBUG
+	SLOF_dma_alloc(0x1000);
+
 	dump_ehci_regs(ehcd);
 #endif
 	ehci_hcd_init(ehcd);

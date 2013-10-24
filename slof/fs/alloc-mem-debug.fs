@@ -102,7 +102,7 @@ malloced-blocks max-malloced-blocks 2 * cells erase
 
 
 \ Enable these for verbose debug messages:
-#if 0
+#if 1
 : alloc-mem
    cr ." alloc-mem with len=" dup .
    alloc-mem

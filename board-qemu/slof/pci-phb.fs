@@ -12,7 +12,7 @@
 
 \ PAPR PCI host bridge.
 
-0 VALUE phb-debug?
+1 VALUE phb-debug?
 
 
 ." Populating " pwd cr
@@ -92,6 +92,7 @@ setup-puid
    dup fff and IF
       ." Warning: dma-alloc got unaligned memory!" cr
    THEN
+   phb-debug? IF cr ." dma-alloc returned: " .s cr THEN
 ;
 
 : dma-free ( virt size -- )

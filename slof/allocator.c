@@ -19,7 +19,7 @@
 #include <helpers.h>
 
 #undef DEBUG
-//#define DEBUG
+#define DEBUG
 #ifdef DEBUG
 #define dprintf(_x ...) do { printf ("%s: ", __func__); printf(_x); } while (0);
 #else
