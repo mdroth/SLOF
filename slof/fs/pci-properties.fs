@@ -93,13 +93,17 @@
 \ align with a size of 0 returns 0 !!!
 : assign-var ( size var -- al-mem )
         2dup @                          \ ( size var size cur-mem ) read current free mem
+        2dup ." assigning value: cur-mem: " . ." size: " .
         swap #aligned                   \ ( size var al-mem )       align the mem to the size
+        dup ." cur-mem-aligned: " .
         dup 2swap -rot +                \ ( al-mem var new-mem )    add size to aligned mem
+        dup ." next-mem-start: " . cr
         swap !                          \ ( al-mem )                set variable to new mem
 ;
 
 \ set bar to current free mem ( in variable ) and set variable to next free mem
 : assign-bar-value32 ( bar size var -- 4 )
+        3dup @ ." assigning value32: var, size, bar: " . . . cr
         over IF                         \ IF size > 0
                 assign-var              \ | ( bar al-mem ) set variable to next mem
                 swap rtas-config-l!     \ | ( -- )         set the bar to al-mem
@@ -111,6 +115,7 @@
 
 \ set bar to current free mem ( in variable ) and set variable to next free mem
 : assign-bar-value64 ( bar size var -- 8 )
+        3dup @ ." assigning value64: var, size, bar: " . . . cr
         over IF                         \ IF size > 0
                 assign-var              \ | ( bar al-mem ) set variable to next mem
                 swap                    \ | ( al-mem addr ) calc config-addr of this bar
@@ -125,6 +130,7 @@
 
 \ Setup a prefetchable 64bit BAR and return its size
 : assign-mem64-bar ( bar-addr -- 8 )
+        dup ." assigning mem64: bar: " . cr
         dup pci-bar-size-mem64         \ fetch size
         pci-next-mem64 @ 0 = IF          \ Check if we have 64-bit memory range
 	    pci-next-mem
@@ -136,6 +142,7 @@
 
 \ Setup a prefetchable 32bit BAR and return its size
 : assign-mem32-bar ( bar-addr -- 4 )
+        dup ." assigning mem32: bar: " . cr
         dup pci-bar-size-mem32          \ fetch size
         pci-next-mem                    \ var to change
         assign-bar-value32              \ and set it all
@@ -143,6 +150,7 @@
 
 \ Setup a non-prefetchable 64bit BAR and return its size
 : assign-mmio64-bar ( bar-addr -- 8 )
+        dup ." assigning mmio64: bar: " . cr
         dup pci-bar-size-mem64          \ fetch size
         pci-next-mem64 @ 0 = IF          \ Check if we have 64-bit memory range
 	    pci-next-mmio
@@ -154,6 +162,7 @@
 
 \ Setup a non-prefetchable 32bit BAR and return its size
 : assign-mmio32-bar ( bar-addr -- 4 )
+        dup ." assigning mmio32: bar: " . cr
         dup pci-bar-size-mem32          \ fetch size
         pci-next-mmio                   \ var to change
         assign-bar-value32              \ and set it all
@@ -161,6 +170,7 @@
 
 \ Setup an IO-Bar and return the size of the base-address-register
 : assign-io-bar ( bar-addr -- 4 )
+        dup ." assigning io: bar: " . cr
         dup pci-bar-size-io             \ fetch size
         pci-next-io                     \ var to change
         assign-bar-value32              \ and set it all
@@ -168,6 +178,7 @@
 
 \ Setup an Expansion ROM bar
 : assign-rom-bar ( bar-addr -- )
+        dup ." assigning rom: bar: " . cr
         dup pci-bar-size-rom            \ fetch size
         dup IF                          \ IF size > 0
                 over >r                 \ | save bar addr for enable
@@ -199,6 +210,7 @@
 
 \ Setup all the bars of a pci device
 : assign-all-device-bars ( configaddr -- )
+        ." ASSIGN-ALL-DEVICE-BARS" cr
         28 10 DO                        \ BARs start at 10 and end at 27
                 dup i +                 \ calc config-addr of the BAR
                 assign-bar              \ and set it up
@@ -652,17 +664,23 @@
 ;
 
 DEFER func-pci-device-props
+DEFER func-assign-all-device-bars
+DEFER func-pci-set-capabilities
 
 \ used for an gerneric device set up
 \ if a device has no special handling for setup
 \ the device file (pci-device_VENDOR_DEVICE.fs) can call
 \ this word to setup the device
 : pci-device-generic-setup ( config-addr -- )
-        dup assign-all-device-bars      \ calc all BARs
+        dup func-assign-all-device-bars \ calc all BARs
         dup pci-set-irq-line            \ set the interrupt pin
-        dup pci-set-capabilities        \ set up the capabilities
+        dup func-pci-set-capabilities        \ set up the capabilities
         dup func-pci-device-props       \ and generate all properties
         drop                            \ forget the config-addr
 ;
 
 ' pci-device-props TO func-pci-device-props
+' assign-all-device-bars TO func-assign-all-device-bars
+' pci-set-capabilities TO func-pci-set-capabilities
+\ FIXME: at this point, we should probably just have a qemu-specific
+\ stub for pci-devices-generic-setup itself

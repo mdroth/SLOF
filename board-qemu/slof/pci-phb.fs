@@ -295,10 +295,12 @@ setup-puid
         my-space pci-htype@                \ read HEADER-Type
         7f and                             \ Mask bit 7 - multifunction device
         CASE
+            ." setting up device" cr
             0 OF my-space pci-device-setup ENDOF  \ | set up the device
             1 OF my-space pci-bridge-setup ENDOF  \ | set up the bridge
             dup OF my-space [char] ? pci-out ENDOF
         ENDCASE
+        ." done setting up device" cr
         peer
     REPEAT drop
     get-parent set-node
@@ -324,6 +326,25 @@ setup-puid
     drop
 ;
 
+\ Stub routine, assigned-addresses property has already been populated
+\ with qemu-assigned addresses.
+: phb-pci-device-props-assigned ( addr -- )
+    drop
+;
+
+\ For now, this skips bar assignment
+\ Ultimately, this needs to check for pre-assigned bars in assigned-addresses
+\ and only handle do unassigned bars. (look at phb-pci-device-props)
+\ Also, take a look at how irq should be handled
+: phb-assign-all-device-bars ( configaddr -- )
+        ." PHB-ASSIGN-ALL-DEVICE-BARS" cr
+        drop
+;
+
+: phb-pci-set-capabilities ( configaddr -- )
+    drop
+;
+
 \ Scan the child nodes of the pci root node to assign bars, fixup
 \ properties etc.
 : phb-setup-children
@@ -336,7 +357,16 @@ setup-puid
    ELSE
        2drop
        ['] phb-pci-bridge-probe TO func-pci-bridge-probe
-       ['] phb-pci-device-props TO func-pci-device-props
+       s" qemu,pci-assigned" get-node get-property 0<> IF
+           ." SLOF-ASSIGNED BARS" cr
+           ['] phb-pci-device-props TO func-pci-device-props
+       ELSE
+           ." QEMU-ASSIGNED BARS" cr
+           ['] phb-assign-all-device-bars TO func-assign-all-device-bars
+           ['] phb-pci-set-capabilities TO func-pci-set-capabilities
+           ['] phb-pci-device-props-assigned TO func-pci-device-props
+       THEN
+       2drop
        phb-pci-walk-bridge          \ PHB device tree is already populated.
    THEN
    r> TO puid                       \ Restore previous puid

@@ -76,14 +76,18 @@ s" dma-function.fs" included
         \ is there special handling for this device, given vendor and device id?
         devicefile romfs-lookup ?dup
                 IF
+                        cr ." setup marker 1" cr
                         \ give it a special treatment
                         evaluate
                 ELSE
+                        cr ." setup marker 2" cr
                         classfile romfs-lookup ?dup
                         IF
+                            cr ." setup marker 3" cr
                             \ give it a pci-class related treatment
                             evaluate
                         ELSE
+                            cr ." setup marker 4" cr
                             \ no special handling for this device, attempt autoconfiguration
                             my-space pci-class-name type 2a emit cr
                             my-space pci-device-generic-setup
