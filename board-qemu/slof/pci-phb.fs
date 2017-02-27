@@ -331,6 +331,7 @@ setup-puid
    my-puid TO puid                  \ Set current puid
    phb-parse-ranges
    1 TO pci-hotplug-enabled
+   10000 TO pci-mem-bar-min-align   \ Force 64k alignment for all mem BARs
    s" qemu,phb-enumerated" get-node get-property 0<> IF
        1 0 (probe-pci-host-bridge)
    ELSE

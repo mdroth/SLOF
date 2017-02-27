@@ -91,15 +91,39 @@
 \ ***************************************************************************************
 \ align the current mem and set var to next mem
 \ align with a size of 0 returns 0 !!!
+: assign-var-min-align ( size var min-align -- al-mem )
+        rot                             \ ( var min-align size )
+        2dup < IF                       \ IF size > min-align
+            swap drop dup               \ ( var size align )
+        ELSE
+            swap                        \ ( var size align )
+        THEN
+        rot                             \ ( size align var )
+        dup @                           \ ( size align var cur-mem ) read current free mem
+        rot                             \ ( size var cur-mem align )
+        #aligned                        \ ( size var al-mem )        align the mem to the size
+        dup 2swap -rot +                \ ( al-mem var new-mem )     add size to aligned mem
+        swap !                          \ ( al-mem )                 set variable to new mem
+;
+
 : assign-var ( size var -- al-mem )
-        2dup @                          \ ( size var size cur-mem ) read current free mem
-        swap #aligned                   \ ( size var al-mem )       align the mem to the size
-        dup 2swap -rot +                \ ( al-mem var new-mem )    add size to aligned mem
-        swap !                          \ ( al-mem )                set variable to new mem
+        0 assign-var-min-align
 ;
 
 \ set bar to current free mem ( in variable ) and set variable to next free mem
 : assign-bar-value32 ( bar size var -- 4 )
+        over IF                         \ IF size > 0
+                pci-mem-bar-min-align
+                assign-var-min-align    \ | ( bar al-mem ) set variable to next mem
+                swap rtas-config-l!     \ | ( -- )         set the bar to al-mem
+        ELSE                            \ ELSE
+                2drop drop              \ | clear stack
+        THEN                            \ FI
+        4                               \ size of the base-address-register
+;
+
+\ set bar to current free mem ( in variable ) and set variable to next free mem
+: assign-io-bar-value32 ( bar size var -- 4 )
         over IF                         \ IF size > 0
                 assign-var              \ | ( bar al-mem ) set variable to next mem
                 swap rtas-config-l!     \ | ( -- )         set the bar to al-mem
@@ -112,7 +136,8 @@
 \ set bar to current free mem ( in variable ) and set variable to next free mem
 : assign-bar-value64 ( bar size var -- 8 )
         over IF                         \ IF size > 0
-                assign-var              \ | ( bar al-mem ) set variable to next mem
+                pci-mem-bar-min-align
+                assign-var-min-align    \ | ( bar al-mem ) set variable to next mem
                 swap                    \ | ( al-mem addr ) calc config-addr of this bar
                 2dup rtas-config-l!     \ | ( al-mem addr ) set the Lower part of the bar to al-mem
                 4 + swap 20 rshift      \ | ( al-mem>>32 addr ) prepare the upper part of the al-mem
@@ -163,7 +188,7 @@
 : assign-io-bar ( bar-addr -- 4 )
         dup pci-bar-size-io             \ fetch size
         pci-next-io                     \ var to change
-        assign-bar-value32              \ and set it all
+        assign-io-bar-value32           \ and set it all
 ;
 
 \ Setup an Expansion ROM bar
