@@ -14,12 +14,14 @@
 #include <cpu.h>
 #include <helpers.h>
 #include <byteorder.h>
+#include <string.h>
 #include "virtio.h"
+#include "helpers.h"
 #include "virtio-blk.h"
 #include "virtio-internal.h"
 
 #define DEFAULT_SECTOR_SIZE 512
-#define DRIVER_FEATURE_SUPPORT  (VIRTIO_BLK_F_BLK_SIZE | VIRTIO_F_VERSION_1)
+#define DRIVER_FEATURE_SUPPORT  (VIRTIO_BLK_F_BLK_SIZE | VIRTIO_F_VERSION_1 | VIRTIO_F_IOMMU_PLATFORM)
 
 /**
  * Initialize virtio-block device.
@@ -28,7 +30,6 @@
 int
 virtioblk_init(struct virtio_device *dev)
 {
-	struct vqs vq;
 	int blk_size = DEFAULT_SECTOR_SIZE;
 	uint64_t features;
 	int status = VIRTIO_STAT_ACKNOWLEDGE;
@@ -54,11 +55,11 @@ virtioblk_init(struct virtio_device *dev)
 		virtio_set_guest_features(dev,  VIRTIO_BLK_F_BLK_SIZE);
 	}
 
-	if (virtio_queue_init_vq(dev, &vq, 0))
+	if (virtio_queue_init_vq(dev, &dev->vq, 0))
 		goto dev_error;
 
-	vq.avail->flags = virtio_cpu_to_modern16(dev, VRING_AVAIL_F_NO_INTERRUPT);
-	vq.avail->idx = 0;
+	dev->vq.avail->flags = virtio_cpu_to_modern16(dev, VRING_AVAIL_F_NO_INTERRUPT);
+	dev->vq.avail->idx = 0;
 
 	/* Tell HV that setup succeeded */
 	status |= VIRTIO_STAT_DRIVER_OK;
@@ -108,6 +109,42 @@ static void fill_blk_hdr(struct virtio_blk_req *blkhdr, bool is_modern,
 	}
 }
 
+/*
+ * dma-map-in rounds addresses down to nearest 4K boundary, then uses
+ * length argument as the offset relative to that boundary. To handle
+ * buffers that are not necessarily 4K-aligned we add in the offset
+ * from the preceeding 4K boundary to make sure all the bytes/pages
+ * get mapped
+ */
+#define DMA_MAP_LEN(addr, len) \
+	((uint64_t)addr & 0xFFF) ? (((uint64_t)addr & 0xFFF) + len) : len
+
+static void
+fill_blk_desc(struct vring_desc *vq_desc, uint32_t vq_size, int id,
+              unsigned int type, bool modern,
+			  uint64_t blkhdr_addr, uint32_t blkhdr_len, 
+			  uint64_t buf_addr, uint32_t buf_len,
+			  uint64_t status_addr)
+{
+	struct vring_desc *desc;
+
+	/* Set up virtqueue descriptor for header */
+   	desc = &vq_desc[id];
+	virtio_fill_desc(desc, modern, (uint64_t)blkhdr_addr, blkhdr_len,
+	                 VRING_DESC_F_NEXT, (id + 1) % vq_size);
+
+	/* Set up virtqueue descriptor for data */
+	desc = &vq_desc[(id + 1) % vq_size];
+	virtio_fill_desc(desc, modern, buf_addr, buf_len,
+	                 VRING_DESC_F_NEXT | ((type & 1) ? 0 : VRING_DESC_F_WRITE),
+	                 (id + 2) % vq_size);
+
+	/* Set up virtqueue descriptor for status */
+	desc = &vq_desc[(id + 2) % vq_size];
+	virtio_fill_desc(desc, modern, (uint64_t)status_addr, 1, VRING_DESC_F_WRITE,
+	                 0);
+}
+
 /**
  * Read / write blocks
  * @param  reg  pointer to "reg" property
@@ -121,22 +158,22 @@ int
 virtioblk_transfer(struct virtio_device *dev, char *buf, uint64_t blocknum,
                    long cnt, unsigned int type)
 {
-	struct vring_desc *desc;
 	int id;
-	static struct virtio_blk_req blkhdr;
+	struct virtio_blk_req blkhdr;
 	//struct virtio_blk_config *blkconf;
 	uint64_t capacity;
 	uint32_t vq_size, time;
-	struct vring_desc *vq_desc;		/* Descriptor vring */
 	struct vring_avail *vq_avail;		/* "Available" vring */
 	struct vring_used *vq_used;		/* "Used" vring */
 	volatile uint8_t status = -1;
 	volatile uint16_t *current_used_idx;
 	uint16_t last_used_idx, avail_idx;
 	int blk_size = DEFAULT_SECTOR_SIZE;
+	int ret = 0;
+	long blkhdr_ioba, buf_ioba, status_ioba = 0;
 
 	//printf("virtioblk_transfer: dev=%p buf=%p blocknum=%lli cnt=%li type=%i\n",
-	//	dev, buf, blocknum, cnt, type);
+	//      dev, buf, blocknum, cnt, type);
 
 	/* Check whether request is within disk capacity */
 	capacity = virtio_get_config(dev,
@@ -156,9 +193,8 @@ virtioblk_transfer(struct virtio_device *dev, char *buf, uint64_t blocknum,
 	}
 
 	vq_size = virtio_get_qsize(dev, 0);
-	vq_desc = virtio_get_vring_desc(dev, 0);
-	vq_avail = virtio_get_vring_avail(dev, 0);
-	vq_used = virtio_get_vring_used(dev, 0);
+	vq_avail = dev->vq.avail;
+	vq_used = dev->vq.used;
 
 	avail_idx = virtio_modern16_to_cpu(dev, vq_avail->idx);
 
@@ -172,22 +208,19 @@ virtioblk_transfer(struct virtio_device *dev, char *buf, uint64_t blocknum,
 	/* Determine descriptor index */
 	id = (avail_idx * 3) % vq_size;
 
-	/* Set up virtqueue descriptor for header */
-	desc = &vq_desc[id];
-	virtio_fill_desc(desc, dev->is_modern, (uint64_t)&blkhdr,
-			 sizeof(struct virtio_blk_req),
-			 VRING_DESC_F_NEXT, (id + 1) % vq_size);
-
-	/* Set up virtqueue descriptor for data */
-	desc = &vq_desc[(id + 1) % vq_size];
-	virtio_fill_desc(desc, dev->is_modern, (uint64_t)buf, cnt * blk_size,
-			 VRING_DESC_F_NEXT | ((type & 1) ? 0 : VRING_DESC_F_WRITE),
-			 (id + 2) % vq_size);
-
-	/* Set up virtqueue descriptor for status */
-	desc = &vq_desc[(id + 2) % vq_size];
-	virtio_fill_desc(desc, dev->is_modern, (uint64_t)&status, 1,
-			 VRING_DESC_F_WRITE, 0);
+	if (dev->use_iommu) {
+		buf_ioba = SLOF_dma_map_in(buf, DMA_MAP_LEN(buf, cnt * blk_size), true);
+		blkhdr_ioba = SLOF_dma_map_in(&blkhdr, sizeof(struct virtio_blk_req),
+		                              true);
+		status_ioba = SLOF_dma_map_in((void *)&status, 1, true);
+		fill_blk_desc(dev->vq.desc, vq_size, id, type, dev->is_modern,
+		              blkhdr_ioba, sizeof(struct virtio_blk_req),
+		              buf_ioba, cnt * blk_size, status_ioba);
+	} else {
+		fill_blk_desc(dev->vq.desc, vq_size, id, type, dev->is_modern,
+		              (uint64_t)&blkhdr, sizeof(struct virtio_blk_req),
+		              (uint64_t)buf, cnt * blk_size, (uint64_t)&status);
+	}
 
 	vq_avail->ring[avail_idx % vq_size] = virtio_cpu_to_modern16 (dev, id);
 	mb();
@@ -205,11 +238,20 @@ virtioblk_transfer(struct virtio_device *dev, char *buf, uint64_t blocknum,
 			break;
 	}
 
-	if (status == 0)
-		return cnt;
+	if (status == 0) {
+		ret = cnt;
+		goto exit_success;
+	}
 
 	printf("virtioblk_transfer failed! type=%i, status = %i\n",
 	       type, status);
+	ret = 0;
 
-	return 0;
+exit_success:
+	if (dev->use_iommu) {
+		SLOF_dma_map_out(buf_ioba, buf, DMA_MAP_LEN(buf, cnt * blk_size));
+		SLOF_dma_map_out(blkhdr_ioba, &blkhdr, sizeof(struct virtio_blk_req));
+		SLOF_dma_map_out(status_ioba, (void *)&status, 1);
+	}
+	return ret;
 }

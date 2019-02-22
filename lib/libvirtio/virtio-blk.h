@@ -34,6 +34,7 @@ struct virtio_blk_cfg {
 	uint32_t	sectors_max;
 } __attribute__ ((packed)) ;
 
+
 /* Block request */
 struct virtio_blk_req {
 	uint32_t  type ;

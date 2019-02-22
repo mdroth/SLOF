@@ -327,6 +327,7 @@ void virtio_fill_desc(struct vring_desc *desc, bool is_modern,
 	}
 }
 
+
 /**
  * Reset virtio device
  */
@@ -385,8 +386,33 @@ void virtio_set_qaddr(struct virtio_device *dev, int queue, unsigned long qaddr)
 	}
 }
 
+static int virtio_queue_init_vq_iommu(struct virtio_device *dev, struct vqs *vq, unsigned int id)
+{
+	long desc_ioba;
+
+	vq->size = virtio_get_qsize(dev, id);
+	vq->desc = SLOF_dma_alloc(virtio_vring_size(vq->size));
+	if (!vq->desc) {
+		printf("DMA memory allocation failed!\n");
+		return -1;
+	}
+	desc_ioba = SLOF_dma_map_in(vq->desc, virtio_vring_size(vq->size), true);
+	memset(vq->desc, 0, virtio_vring_size(vq->size));
+	virtio_set_qaddr(dev, id, desc_ioba);
+
+	vq->avail = (uint64_t)vq->desc + vq->size * sizeof(struct vring_desc);
+	vq->used = VQ_ALIGN((uint64_t)vq->avail + sizeof(struct vring_avail) + sizeof(uint16_t) * vq->size);
+
+	vq->id = id;
+	return 0;
+}
+
 int virtio_queue_init_vq(struct virtio_device *dev, struct vqs *vq, unsigned int id)
 {
+	if (dev->use_iommu) {
+		return virtio_queue_init_vq_iommu(dev, vq, id);
+	}
+
 	vq->size = virtio_get_qsize(dev, id);
 	vq->desc = SLOF_alloc_mem_aligned(virtio_vring_size(vq->size), 4096);
 	if (!vq->desc) {
@@ -394,7 +420,8 @@ int virtio_queue_init_vq(struct virtio_device *dev, struct vqs *vq, unsigned int
 		return -1;
 	}
 	memset(vq->desc, 0, virtio_vring_size(vq->size));
-	virtio_set_qaddr(dev, id, (unsigned long)vq->desc);
+	virtio_set_qaddr(dev, id, vq->desc);
+
 	vq->avail = virtio_get_vring_avail(dev, id);
 	vq->used = virtio_get_vring_used(dev, id);
 	vq->id = id;
@@ -404,6 +431,9 @@ int virtio_queue_init_vq(struct virtio_device *dev, struct vqs *vq, unsigned int
 void virtio_queue_term_vq(struct virtio_device *dev, struct vqs *vq, unsigned int id)
 {
 	if (vq->desc)
+	if (dev->use_iommu)
+		SLOF_dma_free(vq->desc, virtio_vring_size(vq->size));
+	else
 		SLOF_free_mem(vq->desc, virtio_vring_size(vq->size));
 	memset(vq, 0, sizeof(*vq));
 }
@@ -497,12 +527,22 @@ int virtio_negotiate_guest_features(struct virtio_device *dev, uint64_t features
 		fprintf(stderr, "Device does not support virtio 1.0 %llx\n", host_features);
 		return -1;
 	}
+	if ((host_features & VIRTIO_F_IOMMU_PLATFORM)) {
+		dev->use_iommu = true;
+	}
 
 	virtio_set_guest_features(dev,  features);
 	host_features = virtio_get_host_features(dev);
 	if ((host_features & features) != features) {
-		fprintf(stderr, "Features error %llx\n", features);
-		return -1;
+		fprintf(stderr, "Features error, host: %llx, supported: %llx\n",
+		        host_features, features);
+		/*
+		 * TODO: we should distinguish between supported and required features.
+		 * In the case of IOMMU_PLATFORM it is okay if it's not set by host,
+		 * but current logic reports error. For now just ignore the error
+		 * and continue.
+		 */
+		//return -1;
 	}
 
 	virtio_get_status(dev, &status);
