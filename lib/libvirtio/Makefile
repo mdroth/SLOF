@@ -16,7 +16,7 @@ include $(TOPCMNDIR)/make.rules
 
 ASFLAGS = $(FLAG) $(RELEASE) $(CPUARCHDEF) -Wa,-mregnames
 CPPFLAGS = -I../libc/include $(CPUARCHDEF) -I$(INCLBRDDIR) \
-	   -I$(INCLCMNDIR) -I$(INCLCMNDIR)/$(CPUARCH)
+	   -I$(INCLCMNDIR) -I$(INCLCMNDIR)/$(CPUARCH) -I$(SLOFCMNDIR)
 LDFLAGS = -nostdlib
 
 TARGET = ../libvirtio.a

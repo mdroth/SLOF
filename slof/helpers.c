@@ -64,10 +64,20 @@ int get_sec_ticks(void)
 	return 1000;	/* number of ticks in 1 second */
 }
 
+#undef DEBUG
+//#define DEBUG
+#ifdef DEBUG
+#define dprintf(_x ...) do { printf ("%s: ", __func__); printf(_x); } while (0);
+#else
+#define dprintf(_x ...)
+#endif
+
 void *SLOF_dma_alloc(long size)
 {
+    dprintf("called dma_alloc, size: %lx\n", size);
 	forth_push(size);
 	forth_eval("dma-alloc");
+    dprintf("returning from dma_alloc\n");
 	return (void *)forth_pop();
 }
 
@@ -80,8 +90,10 @@ void SLOF_dma_free(void *virt, long size)
 
 void *SLOF_alloc_mem(long size)
 {
+    dprintf("called alloc_mem, size: %lx\n", size);
 	forth_push(size);
 	forth_eval("alloc-mem");
+    dprintf("returning from alloc_mem\n");
 	return (void *)forth_pop();
 }
 

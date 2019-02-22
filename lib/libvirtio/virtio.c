@@ -20,6 +20,15 @@
 #include <byteorder.h>
 #include "virtio.h"
 #include "helpers.h"
+#include "paflof.h"
+
+#undef DEBUG
+//#define DEBUG
+#ifdef DEBUG
+#define dprintf(_x ...) do { printf ("%s: ", __func__); printf(_x); } while (0);
+#else
+#define dprintf(_x ...)
+#endif
 
 /* PCI virtio header offsets */
 #define VIRTIOHDR_DEVICE_FEATURES	0
@@ -167,6 +176,8 @@ struct virtio_device *virtio_setup_vd(void)
 	uint8_t cap_ptr, cap_vndr;
 	struct virtio_device *dev;
 
+    dprintf("virtio_setup_vd called\n");
+
 	dev = SLOF_alloc_mem(sizeof(struct virtio_device));
 	if (!dev) {
 		printf("Failed to allocate memory");
@@ -249,7 +260,10 @@ struct vring_desc *virtio_get_vring_desc(struct virtio_device *dev, int queue)
 
 		ci_write_16(q_sel, cpu_to_le16(queue));
 		eieio();
-		desc = (void *)(virtio_pci_read64(q_desc));
+        if (dev->use_iommu)
+		    desc = (void *)(virtio_pci_read64(q_desc));
+        else
+		    desc = (void *)(virtio_pci_read64(q_desc));
 	} else {
 		ci_write_16(dev->legacy.addr+VIRTIOHDR_QUEUE_SELECT,
 			    cpu_to_le16(queue));
@@ -327,11 +341,38 @@ void virtio_fill_desc(struct vring_desc *desc, bool is_modern,
 	}
 }
 
+void virtio_fill_desc2(struct vring_desc *desc, bool is_modern,
+                       bool use_iommu,
+                       uint64_t addr, uint32_t len,
+                       uint16_t flags, uint16_t next)
+{
+	if (is_modern) {
+        uint64_t ioba = addr;
+
+        if (use_iommu) {
+            dprintf("mapping in %llx, size: %lx\n", addr, len);
+            ioba = SLOF_dma_map_in(addr, len, true);
+            dprintf("mapping complete, ioba: %llx\n", ioba);
+        }
+
+		desc->addr = cpu_to_le64(ioba);
+		desc->len = cpu_to_le32(len);
+		desc->flags = cpu_to_le16(flags);
+		desc->next = cpu_to_le16(next);
+	} else {
+		desc->addr = addr;
+		desc->len = len;
+		desc->flags = flags;
+		desc->next = next;
+	}
+}
+
 /**
  * Reset virtio device
  */
 void virtio_reset_device(struct virtio_device *dev)
 {
+    dprintf("virtio_reset_device\n");
 	virtio_set_status(dev, 0);
 }
 
@@ -385,16 +426,44 @@ void virtio_set_qaddr(struct virtio_device *dev, int queue, unsigned long qaddr)
 	}
 }
 
+static int virtio_queue_init_vq_iommu(struct virtio_device *dev, struct vqs *vq, unsigned int id)
+{
+    long desc_ioba;
+
+	vq->size = virtio_get_qsize(dev, id);
+	vq->desc = SLOF_dma_alloc(virtio_vring_size(vq->size));
+	if (!vq->desc) {
+	    printf("DMA memory allocation failed!\n");
+	    return -1;
+	}
+    desc_ioba = SLOF_dma_map_in(vq->desc, virtio_vring_size(vq->size), true);
+	printf("\nvq->desc: %lx, ioba: %lx.\n", vq->desc, desc_ioba);
+	memset(vq->desc, 0, virtio_vring_size(vq->size));
+	virtio_set_qaddr(dev, id, desc_ioba);
+
+	vq->avail = (uint64_t)vq->desc + vq->size * sizeof(struct vring_desc);
+	vq->used = VQ_ALIGN((uint64_t)vq->avail + sizeof(struct vring_avail) + sizeof(uint16_t) * vq->size);
+
+	printf("\nvq->desc: %lx, vq->avail: %lx, vq->used: %lx\n", vq->desc, vq->avail, vq->used);
+	vq->id = id;
+	return 0;
+}
+
 int virtio_queue_init_vq(struct virtio_device *dev, struct vqs *vq, unsigned int id)
 {
+    if (dev->use_iommu) {
+        return virtio_queue_init_vq_iommu(dev, vq, id);
+    }
+
 	vq->size = virtio_get_qsize(dev, id);
-	vq->desc = SLOF_alloc_mem_aligned(virtio_vring_size(vq->size), 4096);
+    vq->desc = SLOF_alloc_mem_aligned(virtio_vring_size(vq->size), 4096);
 	if (!vq->desc) {
-		printf("memory allocation failed!\n");
-		return -1;
+	    printf("memory allocation failed!\n");
+	    return -1;
 	}
 	memset(vq->desc, 0, virtio_vring_size(vq->size));
-	virtio_set_qaddr(dev, id, (unsigned long)vq->desc);
+	virtio_set_qaddr(dev, id, vq->desc);
+
 	vq->avail = virtio_get_vring_avail(dev, id);
 	vq->used = virtio_get_vring_used(dev, id);
 	vq->id = id;
@@ -404,7 +473,10 @@ int virtio_queue_init_vq(struct virtio_device *dev, struct vqs *vq, unsigned int
 void virtio_queue_term_vq(struct virtio_device *dev, struct vqs *vq, unsigned int id)
 {
 	if (vq->desc)
-		SLOF_free_mem(vq->desc, virtio_vring_size(vq->size));
+        if (dev->use_iommu)
+		    SLOF_dma_free(vq->desc, virtio_vring_size(vq->size));
+        else
+		    SLOF_free_mem(vq->desc, virtio_vring_size(vq->size));
 	memset(vq, 0, sizeof(*vq));
 }
 
@@ -413,6 +485,7 @@ void virtio_queue_term_vq(struct virtio_device *dev, struct vqs *vq, unsigned in
  */
 void virtio_set_status(struct virtio_device *dev, int status)
 {
+    dprintf("virtio_set_status: dev: %p, status: %x\n", dev, status);
 	if (dev->is_modern) {
 		ci_write_8(dev->common.addr +
 			   offset_of(struct virtio_dev_common, dev_status), status);
@@ -426,6 +499,7 @@ void virtio_set_status(struct virtio_device *dev, int status)
  */
 void virtio_get_status(struct virtio_device *dev, int *status)
 {
+    dprintf("virtio_get_status: dev: %p, status: %x\n", dev, status);
 	if (dev->is_modern) {
 		*status = ci_read_8(dev->common.addr +
 				    offset_of(struct virtio_dev_common, dev_status));
@@ -497,12 +571,16 @@ int virtio_negotiate_guest_features(struct virtio_device *dev, uint64_t features
 		fprintf(stderr, "Device does not support virtio 1.0 %llx\n", host_features);
 		return -1;
 	}
+	if ((host_features & VIRTIO_F_IOMMU_PLATFORM)) {
+        dev->use_iommu = true;
+    }
 
 	virtio_set_guest_features(dev,  features);
 	host_features = virtio_get_host_features(dev);
 	if ((host_features & features) != features) {
 		fprintf(stderr, "Features error %llx\n", features);
-		return -1;
+		printf("unsupported feature, guest: %llx, host: %llx\n", features, host_features);
+		//return -1;
 	}
 
 	virtio_get_status(dev, &status);

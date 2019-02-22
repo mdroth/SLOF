@@ -12,4 +12,5 @@
 
 \ Device ID 1042 is for virtio-blk non-transitional device.
 \ Include the driver for virtio-blk
+s" virtio-parent-calls.fs" included
 s" pci-device_1af4_1001.fs" included

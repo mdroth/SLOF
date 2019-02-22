@@ -87,6 +87,8 @@ VIO_FFS_FILES = \
 	$(SLOFBRDDIR)/rtas-nvram.fs \
 	$(SLOFBRDDIR)/virtio-net.fs \
 	$(SLOFBRDDIR)/virtio-serial.fs \
+	$(SLOFBRDDIR)/virtio-parent-calls.fs \
+	$(SLOFBRDDIR)/virtio-parent-calls-internal.fs \
 	$(SLOFBRDDIR)/virtio-block.fs \
 	$(SLOFBRDDIR)/virtio-fs.fs \
 	$(SLOFBRDDIR)/dev-null.fs \

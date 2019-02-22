@@ -12,6 +12,8 @@
 
 get-node CONSTANT my-phandle
 
+cr ." pci-device LOADED" cr
+
 \ get the PUID from the node above
 s" my-puid" my-phandle parent $call-static CONSTANT my-puid
 
@@ -33,6 +35,7 @@ s" my-puid" my-phandle parent $call-static CONSTANT my-puid
 \ the device file can call this file before implementing
 \ its own open functionality
 : open
+        cr ." pci-device open marker 0" cr
         puid >r             \ save the old puid
         my-puid TO puid     \ set up the puid to the devices Hostbridge
         pci-master-enable   \ And enable Bus Master, IO and MEM access again.
@@ -40,6 +43,7 @@ s" my-puid" my-phandle parent $call-static CONSTANT my-puid
         pci-io-enable       \ enable io access
         r> TO puid          \ restore puid
         true
+        cr ." pci-device open marker 1" cr
 ;
 
 \ close the previously opened device
@@ -47,10 +51,12 @@ s" my-puid" my-phandle parent $call-static CONSTANT my-puid
 \ the device file can call this file after its implementation
 \ of own close functionality
 : close 
+        cr ." pci-device close marker 0" cr
         puid >r             \ save the old puid
         my-puid TO puid     \ set up the puid
         pci-device-disable  \ and disable the device
         r> TO puid          \ restore puid
+        cr ." pci-device open marker 0" cr
 ;
 
 s" dma-function.fs" included

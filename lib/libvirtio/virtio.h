@@ -30,6 +30,7 @@
 #define VIRTIO_F_RING_INDIRECT_DESC	BIT(28)
 #define VIRTIO_F_RING_EVENT_IDX		BIT(29)
 #define VIRTIO_F_VERSION_1		BIT(32)
+#define VIRTIO_F_IOMMU_PLATFORM		BIT(33)
 
 #define VIRTIO_TIMEOUT		        5000 /* 5 sec timeout */
 
@@ -78,6 +79,15 @@ struct virtio_cap {
 	uint8_t cap_id;
 };
 
+struct vqs {
+	uint64_t id;	/* Queue ID */
+	uint32_t size;
+	void *buf_mem;
+	struct vring_desc *desc;
+	struct vring_avail *avail;
+	struct vring_used *used;
+};
+
 struct virtio_device {
 	uint32_t is_modern;     /* Indicates whether to use virtio 1.0 */
 	struct virtio_cap legacy;
@@ -87,15 +97,8 @@ struct virtio_device {
 	struct virtio_cap device;
 	struct virtio_cap pci;
 	uint32_t notify_off_mul;
-};
-
-struct vqs {
-	uint64_t id;	/* Queue ID */
-	uint32_t size;
-	void *buf_mem;
-	struct vring_desc *desc;
-	struct vring_avail *avail;
-	struct vring_used *used;
+    uint32_t use_iommu;
+    struct vqs vq;
 };
 
 /* Parts of the virtqueue are aligned on a 4096 byte page boundary */
@@ -109,6 +112,10 @@ extern struct vring_used *virtio_get_vring_used(struct virtio_device *dev, int q
 extern void virtio_fill_desc(struct vring_desc *desc, bool is_modern,
                              uint64_t addr, uint32_t len,
                              uint16_t flags, uint16_t next);
+extern void virtio_fill_desc2(struct vring_desc *desc, bool is_modern,
+                              bool use_iommu,
+                              uint64_t addr, uint32_t len,
+                              uint16_t flags, uint16_t next);
 extern int virtio_queue_init_vq(struct virtio_device *dev, struct vqs *vq, unsigned int id);
 extern void virtio_queue_term_vq(struct virtio_device *dev, struct vqs *vq, unsigned int id);
 

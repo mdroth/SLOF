@@ -14,7 +14,9 @@
 
 s" block" device-type
 
+cr ." virtio-block LOADED" cr
 FALSE VALUE initialized?
+FALSE VALUE vpc-loaded?
 
 \ Required interface for deblocker
 
@@ -28,6 +30,7 @@ virtio-setup-vd VALUE virtiodev
 \ Quiesce the virtqueue of this device so that no more background
 \ transactions can be pending.
 : shutdown  ( -- )
+   ." virtio-blk shutdown" cr
     initialized? IF
         my-phandle node>path open-dev ?dup IF
             virtiodev virtio-blk-shutdown
@@ -39,6 +42,7 @@ virtio-setup-vd VALUE virtiodev
 
 \ Basic device initialization - which has only to be done once
 : init  ( -- )
+   ." virtio-blk init" cr
    virtiodev virtio-blk-init to block-size
    TRUE to initialized?
    ['] shutdown add-quiesce-xt
@@ -60,22 +64,34 @@ virtio-setup-vd VALUE virtiodev
 
 \ Standard node "open" function
 : open  ( -- okay? )
+   ." virtio-blk open marker 0" cr
    open 0= IF false EXIT THEN
    dup initialized? 0= AND IF
+      ." virtio-blk open marker 0b" cr
+      init
+   ELSE
+      ." virtio-blk open marker 0c (forcing re-init)" cr
       init
    THEN
+   ." virtio-blk open marker 1" cr
    0 0 s" deblocker" $open-package dup deblocker ! dup IF
+      ." virtio-blk open marker 2" cr
       s" disk-label" find-package IF
          my-args rot interpose
+         ." virtio-blk open marker 3" cr
       THEN
    THEN
+   ." virtio-blk open marker 4" cr
    0<>
 ;
 
 \ Standard node "close" function
 : close  ( -- )
+   ." virtio-blk close marker 0" cr
    deblocker @ close-package
+   ." virtio-blk close marker 1" cr
    close
+   ." virtio-blk close marker 2" cr
 ;
 
 \ Standard node "seek" function
